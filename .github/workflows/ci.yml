@@ -28,5 +28,4 @@ jobs:
       - name: Typecheck
         run: bun run typecheck
       - name: Test with coverage
-        if: ${{ hashFiles('tests/**/*.test.ts') != '' }}
         run: bun run test:coverage
