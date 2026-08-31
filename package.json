@@ -21,6 +21,7 @@
   "files": [
     "bun.lock",
     "index.ts",
+    "docs",
     "src",
     "paseo-plugin.d.ts",
     "paseo-plugin.json",
