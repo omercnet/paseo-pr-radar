@@ -42,4 +42,6 @@ bunx paseo plugin reload pr-radar
 
 Release Please maintains the version, changelog, tags, and GitHub releases from Conventional Commits. Each release includes an installable `pr-radar-vX.Y.Z.zip` archive.
 
-The project targets Paseo 0.6. React 19.1 and React Native 0.81 match the versions supplied by the plugin host.
+The project targets Paseo `0.7.0-beta.3` or later. Host-owned navigation opens linked agents and
+workspaces without private routes or page reloads on web, desktop, iOS, and Android. React `19.1`
+and React Native `0.81` match the versions supplied by the plugin host.
