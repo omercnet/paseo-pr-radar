@@ -80,7 +80,7 @@ function agentState(row: RadarRow): string {
   return `${agent.title} · ${agent.status}${extra}`;
 }
 
-export function PrRadar({ theme, layout, host }: PluginSurfaceProps) {
+export function PrRadar({ theme, layout, host, navigation }: PluginSurfaceProps) {
   const paseo = usePaseo();
   const queryClient = useQueryClient();
   const queryKey = useMemo(() => ["pr-radar", host.id], [host.id]);
@@ -171,7 +171,7 @@ export function PrRadar({ theme, layout, host }: PluginSurfaceProps) {
         throw new Error("Configure an agent profile in Paseo before starting an agent.");
       }
       const provider = profile.model ? `${profile.provider}/${profile.model}` : profile.provider;
-      await paseo.workspaces.ref(action.workspaceId).agents.create({
+      const created = await paseo.workspaces.ref(action.workspaceId).agents.create({
         config: {
           provider,
           ...(profile.modeId ? { modeId: profile.modeId } : {}),
@@ -181,6 +181,7 @@ export function PrRadar({ theme, layout, host }: PluginSurfaceProps) {
         title: `PR Radar: ${row.repository}#${row.number ?? "PR"}`,
         prompt,
       });
+      navigation?.openAgent({ agentId: created.id });
       return `Started ${profile.name} for ${row.repository}#${row.number ?? "PR"}.`;
     },
     onMutate: () => {
@@ -423,18 +424,24 @@ export function PrRadar({ theme, layout, host }: PluginSurfaceProps) {
             </Text>
           </Pressable>
         ) : null}
-        {layout.platform === "web" && primaryAgent ? (
+        {navigation && primaryAgent ? (
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={`Open agent ${primaryAgent.title}`}
-            onPress={() =>
-              globalThis.location.assign(
-                `/h/${encodeURIComponent(host.id)}/agent/${encodeURIComponent(primaryAgent.id)}`,
-              )
-            }
+            onPress={() => navigation.openAgent({ agentId: primaryAgent.id })}
             style={({ pressed }) => [styles.action, pressed && styles.refreshPressed]}
           >
             <Text style={styles.actionText}>Open agent</Text>
+          </Pressable>
+        ) : null}
+        {navigation && !primaryAgent && item.workspaceIds[0] ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`Open workspace for ${item.repository} ${item.number ?? ""}`}
+            onPress={() => navigation.openWorkspace({ workspaceId: item.workspaceIds[0] })}
+            style={({ pressed }) => [styles.action, pressed && styles.refreshPressed]}
+          >
+            <Text style={styles.actionText}>Open workspace</Text>
           </Pressable>
         ) : null}
         <Pressable
