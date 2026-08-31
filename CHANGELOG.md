@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.0](https://github.com/omercnet/paseo-pr-radar/compare/v0.1.0...v0.2.0) (2026-08-31)
+
+
+### Features
+
+* **plugin:** use host navigation for workspace links ([#8](https://github.com/omercnet/paseo-pr-radar/issues/8)) ([ed4d317](https://github.com/omercnet/paseo-pr-radar/commit/ed4d3171d09345a7dc3cfa132fc5cdbce459a235))
+
 ## 0.1.0 (2026-08-30)
 
 
