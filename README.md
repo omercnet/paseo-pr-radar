@@ -4,6 +4,19 @@ A Paseo plugin that turns pull requests linked to active workspaces into a viewe
 
 PR Radar combines Paseo workspace and agent state with pull request checks, review status, mergeability, and the current GitHub user's relationship to each pull request. It answers which deliverables need you, which are already being handled, and which are waiting elsewhere.
 
+## Screenshots
+
+Repository, pull request, workspace, and agent names in these screenshots are synthetic. The live
+browser DOM was rewritten before capture so no private identifiers are published.
+
+### Wide dashboard
+
+![PR Radar wide dashboard](docs/images/pr-radar-wide.png)
+
+### Compact dashboard
+
+![PR Radar compact dashboard](docs/images/pr-radar-compact.png)
+
 ## What it shows
 
 - Needs you: authored blockers and review requests whose checks have completed.

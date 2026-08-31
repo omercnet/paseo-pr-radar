@@ -8,6 +8,8 @@ const releaseFiles = [
   "LICENSE",
   "README.md",
   "index.ts",
+  "docs/images/pr-radar-wide.png",
+  "docs/images/pr-radar-compact.png",
   "src/components/pr-radar.client.tsx",
   "src/lib/radar.shared.ts",
   "src/lib/viewer-scope.server.ts",
