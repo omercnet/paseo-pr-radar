@@ -1,5 +1,6 @@
 import type { PaseoAgentListResult, PaseoWorkspace } from "@getpaseo/client";
 import { z } from "zod";
+import type { GitHubInboxItem } from "./viewer-scope.shared";
 
 export type AgentEntry = PaseoAgentListResult["entries"][number];
 export type RadarBucket = "needs-you" | "being-handled" | "waiting" | "ready";
@@ -56,6 +57,12 @@ export interface RadarRow {
   baseRefName: string;
   headRefName: string;
   isDraft: boolean;
+  author: string | null;
+  authorKind: "human" | "bot";
+  isSecurity: boolean;
+  comments: number;
+  labels: string[];
+  changes: string[];
   mergeable: "UNKNOWN" | "MERGEABLE" | "CONFLICTING";
   mergeStateStatus: string | null;
   checksStatus: "success" | "pending" | "none" | "failure";
@@ -63,6 +70,7 @@ export interface RadarRow {
   checks: RadarCheck[];
   workspaceIds: string[];
   workspaceNames: string[];
+  localProjectRoot: string | null;
   agents: RadarAgent[];
   ownership: ViewerOwnership;
   reviewRequestedFromMe: boolean;
@@ -83,17 +91,20 @@ export interface RadarSnapshot {
   warnings: RadarWarning[];
   workspaceCount: number;
   refreshedAt: string;
+  repositoryRoots: Record<string, string>;
 }
 
 export interface ViewerScopeData {
   authoredUrls: readonly string[];
   reviewRequestedUrls: readonly string[];
   error: string | null;
+  inboxItems: readonly GitHubInboxItem[];
 }
 
 export type RadarAgentAction =
   | { kind: "ask"; agentId: string }
   | { kind: "start"; workspaceId: string }
+  | { kind: "checkout"; cwd: string; number: number; repository: string }
   | null;
 
 function isOpenPullRequest(state: string, isMerged: boolean): boolean {
@@ -139,6 +150,11 @@ function parseRepository(url: string): string {
   } catch {
     return "Unknown repository";
   }
+}
+
+function parseRemoteRepository(remoteUrl: string): string | null {
+  const match = remoteUrl.match(/github\.com[/:]([^/]+)\/([^/]+?)(?:\.git)?$/i);
+  return match ? `${match[1]}/${match[2]}` : null;
 }
 
 export function hasActiveAgent(agents: readonly RadarAgent[]): boolean {
@@ -275,7 +291,16 @@ export function agentActionFor(row: RadarRow): RadarAgentAction {
   );
   if (promptable) return { kind: "ask", agentId: promptable.id };
   const workspaceId = row.workspaceIds[0];
-  return workspaceId ? { kind: "start", workspaceId } : null;
+  if (workspaceId) return { kind: "start", workspaceId };
+  if (row.localProjectRoot && row.number) {
+    return {
+      kind: "checkout",
+      cwd: row.localProjectRoot,
+      number: row.number,
+      repository: row.repository,
+    };
+  }
+  return null;
 }
 
 export function buildAgentPrompt(row: RadarRow): string {
@@ -302,8 +327,15 @@ export function buildRadarSnapshot(
 
   const rows = new Map<string, RadarRow>();
   const warnings: RadarWarning[] = [];
+  const repositoryRoots: Record<string, string> = {};
 
   for (const workspace of workspaces) {
+    const remoteRepository = workspace.gitRuntime?.remoteUrl
+      ? parseRemoteRepository(workspace.gitRuntime.remoteUrl)
+      : null;
+    if (remoteRepository) {
+      repositoryRoots[remoteRepository.toLowerCase()] ??= workspace.projectRootPath;
+    }
     const runtime = workspace.githubRuntime;
     if (runtime?.error?.message) {
       warnings.push({
@@ -358,6 +390,12 @@ export function buildRadarSnapshot(
       baseRefName: pullRequest.baseRefName,
       headRefName: pullRequest.headRefName,
       isDraft: pullRequest.isDraft ?? false,
+      author: null,
+      authorKind: "human",
+      isSecurity: false,
+      comments: 0,
+      labels: [],
+      changes: [],
       mergeable: pullRequest.mergeable ?? "UNKNOWN",
       mergeStateStatus: facts?.mergeStateStatus ?? null,
       checksStatus: pullRequest.checksStatus ?? "none",
@@ -365,6 +403,7 @@ export function buildRadarSnapshot(
       checks: pullRequest.checks ?? [],
       workspaceIds: [workspace.id],
       workspaceNames: [workspace.name],
+      localProjectRoot: repositoryRoots[repository.toLowerCase()] ?? workspace.projectRootPath,
       agents: [...agents],
       ownership: "unknown",
       reviewRequestedFromMe: false,
@@ -392,7 +431,90 @@ export function buildRadarSnapshot(
     warnings,
     workspaceCount: workspaces.length,
     refreshedAt: now.toISOString(),
+    repositoryRoots,
   };
+}
+
+export function mergeInboxRows(
+  snapshot: RadarSnapshot,
+  inboxItems: readonly GitHubInboxItem[],
+): RadarRow[] {
+  const rows = new Map(snapshot.rows.map((row) => [row.id, { ...row }]));
+  for (const item of inboxItems) {
+    const id = `${item.repository.toLowerCase()}#${item.number}`;
+    const existing = rows.get(id);
+    if (existing) {
+      existing.title = item.title;
+      existing.url = item.url;
+      existing.author = item.author;
+      existing.authorKind = item.authorKind;
+      existing.isSecurity = item.isSecurity;
+      existing.comments = item.comments;
+      existing.labels = [...item.labels];
+      existing.changes = [...item.changes];
+      existing.isDraft = item.isDraft;
+      existing.baseRefName = item.baseRefName || existing.baseRefName;
+      existing.headRefName = item.headRefName || existing.headRefName;
+      existing.mergeable = item.mergeable;
+      existing.mergeStateStatus = item.mergeStateStatus;
+      existing.checksStatus = item.checksStatus;
+      existing.reviewDecision = item.reviewDecision;
+      existing.ownership = item.role === "author" ? "mine" : "external";
+      existing.reviewRequestedFromMe = item.role === "reviewer";
+      existing.localProjectRoot ??= snapshot.repositoryRoots[item.repository.toLowerCase()] ?? null;
+      if (Date.parse(item.updatedAt) > Date.parse(existing.activityAt ?? "")) {
+        existing.activityAt = item.updatedAt;
+      }
+      const classification = classifyRow(existing);
+      existing.bucket = classification.bucket;
+      existing.reason = classification.reason;
+      continue;
+    }
+
+    const row: RadarRow = {
+      id,
+      number: item.number,
+      url: item.url,
+      title: item.title,
+      repository: item.repository,
+      baseRefName: item.baseRefName,
+      headRefName: item.headRefName,
+      isDraft: item.isDraft,
+      author: item.author,
+      authorKind: item.authorKind,
+      isSecurity: item.isSecurity,
+      comments: item.comments,
+      labels: [...item.labels],
+      changes: [...item.changes],
+      mergeable: item.mergeable,
+      mergeStateStatus: item.mergeStateStatus,
+      checksStatus: item.checksStatus,
+      reviewDecision: item.reviewDecision,
+      checks: [],
+      workspaceIds: [],
+      workspaceNames: [],
+      localProjectRoot: snapshot.repositoryRoots[item.repository.toLowerCase()] ?? null,
+      agents: [],
+      ownership: item.role === "author" ? "mine" : "external",
+      reviewRequestedFromMe: item.role === "reviewer",
+      bucket: "waiting",
+      reason: "Waiting on repository status",
+      activityAt: item.updatedAt,
+      refreshedAt: item.updatedAt,
+    };
+    const classification = classifyRow(row);
+    row.bucket = classification.bucket;
+    row.reason = classification.reason;
+    rows.set(id, row);
+  }
+
+  return [...rows.values()].sort((left, right) => {
+    const byBucket = BUCKET_ORDER[left.bucket] - BUCKET_ORDER[right.bucket];
+    if (byBucket !== 0) return byBucket;
+    const byActivity = Date.parse(right.activityAt ?? "") - Date.parse(left.activityAt ?? "");
+    if (byActivity !== 0) return byActivity;
+    return left.title.localeCompare(right.title);
+  });
 }
 
 export function applyViewerScope(

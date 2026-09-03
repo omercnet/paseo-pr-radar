@@ -1,10 +1,11 @@
 import type { PluginContext } from "@getpaseo/plugin";
 import { PrRadar } from "./src/components/pr-radar.client";
-import { resolveViewerScope } from "./src/lib/viewer-scope.server";
-import { viewerScope } from "./src/lib/viewer-scope.shared";
+import { acknowledgeViewerUpdates, resolveViewerScope } from "./src/lib/viewer-scope.server";
+import { acknowledgeViewerScope, viewerScope } from "./src/lib/viewer-scope.shared";
 
 export default function contribute(plugin: PluginContext) {
   plugin.handle(viewerScope, resolveViewerScope);
+  plugin.handle(acknowledgeViewerScope, acknowledgeViewerUpdates);
   plugin.addSurface("radar", PrRadar);
   plugin.addSidebarItem({
     id: "radar",
