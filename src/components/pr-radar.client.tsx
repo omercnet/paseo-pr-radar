@@ -21,17 +21,30 @@ import {
   buildRadarSnapshot,
   checkSummary,
   formatAge,
+  hasActiveAgent,
   matchesRow,
+  mergeInboxRows,
   type RadarBucket,
   type RadarRow,
 } from "../lib/radar.shared";
-import { viewerScope } from "../lib/viewer-scope.shared";
+import { acknowledgeViewerScope, viewerScope } from "../lib/viewer-scope.shared";
 
 const PAGE_LIMIT = 200;
 const MAX_PAGES = 10;
 const BACKSTOP_REFRESH_MS = 60_000;
 const EVENT_DEBOUNCE_MS = 500;
 const CLOCK_TICK_MS = 30_000;
+
+type SavedView = "security" | "updated" | "stale" | "automation";
+
+const SAVED_VIEW_TITLES: Record<SavedView, string> = {
+  security: "Security",
+  updated: "Updated",
+  stale: "Stale",
+  automation: "Automation",
+};
+
+const STALE_AFTER_MS = 3 * 24 * 60 * 60 * 1_000;
 
 async function loadAgents(paseo: PaseoApi): Promise<AgentEntry[]> {
   const entries: AgentEntry[] = [];
@@ -85,7 +98,11 @@ export function PrRadar({ theme, layout, host, navigation }: PluginSurfaceProps)
   const queryClient = useQueryClient();
   const queryKey = useMemo(() => ["pr-radar", host.id], [host.id]);
   const resolveViewerScope = useRpc(viewerScope);
+  const acknowledgeUpdates = useRpc(acknowledgeViewerScope);
   const [selected, setSelected] = useState<RadarBucket | null>(null);
+  const [activeOnly, setActiveOnly] = useState(false);
+  const [savedView, setSavedView] = useState<SavedView | null>(null);
+  const [windowDays, setWindowDays] = useState(30);
   const [search, setSearch] = useState("");
   const [now, setNow] = useState(() => Date.now());
   const [openError, setOpenError] = useState<string | null>(null);
@@ -137,13 +154,19 @@ export function PrRadar({ theme, layout, host, navigation }: PluginSurfaceProps)
     isFetching: isViewerFetching,
     refetch: refetchViewer,
   } = useQuery({
-    queryKey: ["pr-radar-viewer-scope", host.id, scopeUrls],
-    queryFn: () => resolveViewerScope({ urls: scopeUrls }),
-    enabled: scopeUrls.length > 0,
+    queryKey: ["pr-radar-viewer-scope", host.id, scopeUrls, windowDays],
+    queryFn: () => resolveViewerScope({ urls: scopeUrls, windowDays }),
     staleTime: 5 * 60_000,
     refetchInterval: 5 * 60_000,
   });
-  const rows = useMemo(() => applyViewerScope(rawRows, viewerData ?? null), [rawRows, viewerData]);
+  const mergedRows = useMemo(
+    () => (data ? mergeInboxRows(data, viewerData?.inboxItems ?? []) : []),
+    [data, viewerData],
+  );
+  const rows = useMemo(
+    () => applyViewerScope(mergedRows, viewerData ?? null),
+    [mergedRows, viewerData],
+  );
   const isFetching = isDirectoryFetching || isViewerFetching;
   const viewerError =
     viewerData?.error ??
@@ -152,6 +175,18 @@ export function PrRadar({ theme, layout, host, navigation }: PluginSurfaceProps)
       : viewerQueryError
         ? "error"
         : null);
+  const acknowledgeMutation = useMutation({
+    mutationFn: () => acknowledgeUpdates({ windowDays }),
+    onSuccess: async () => {
+      setActionNotice("PR Radar updates marked as seen.");
+      await refetchViewer();
+    },
+    onError: (mutationError) => {
+      setOpenError(
+        mutationError instanceof Error ? mutationError.message : "Could not clear radar updates.",
+      );
+    },
+  });
   const agentMutation = useMutation({
     mutationFn: async (row: RadarRow) => {
       const action = agentActionFor(row);
@@ -171,7 +206,7 @@ export function PrRadar({ theme, layout, host, navigation }: PluginSurfaceProps)
         throw new Error("Configure an agent profile in Paseo before starting an agent.");
       }
       const provider = profile.model ? `${profile.provider}/${profile.model}` : profile.provider;
-      const created = await paseo.workspaces.ref(action.workspaceId).agents.create({
+      const agentOptions = {
         config: {
           provider,
           ...(profile.modeId ? { modeId: profile.modeId } : {}),
@@ -180,7 +215,25 @@ export function PrRadar({ theme, layout, host, navigation }: PluginSurfaceProps)
         },
         title: `PR Radar: ${row.repository}#${row.number ?? "PR"}`,
         prompt,
-      });
+      };
+      const targetWorkspace =
+        action.kind === "checkout"
+          ? await paseo.workspaces.create({
+              title: `${row.reviewRequestedFromMe ? "Review" : "Work on"} ${row.repository}#${action.number}`,
+              source: {
+                kind: "worktree",
+                cwd: action.cwd,
+                action: "checkout",
+                checkoutSource: {
+                  kind: "change_request",
+                  forge: "github",
+                  number: action.number,
+                  projectPath: action.repository,
+                },
+              },
+            })
+          : paseo.workspaces.ref(action.workspaceId);
+      const created = await targetWorkspace.agents.create(agentOptions);
       navigation?.openAgent({ agentId: created.id });
       return `Started ${profile.name} for ${row.repository}#${row.number ?? "PR"}.`;
     },
@@ -208,9 +261,39 @@ export function PrRadar({ theme, layout, host, navigation }: PluginSurfaceProps)
     for (const row of rows) result[row.bucket] += 1;
     return result;
   }, [rows]);
+  const activeCount = useMemo(
+    () => rows.filter((row) => hasActiveAgent(row.agents)).length,
+    [rows],
+  );
+  const savedViewCounts = useMemo<Record<SavedView, number>>(
+    () => ({
+      security: rows.filter(({ isSecurity }) => isSecurity).length,
+      updated: rows.filter(({ changes }) => changes.length > 0).length,
+      stale: rows.filter(
+        ({ activityAt }) => activityAt && now - Date.parse(activityAt) >= STALE_AFTER_MS,
+      ).length,
+      automation: rows.filter(({ authorKind }) => authorKind === "bot").length,
+    }),
+    [now, rows],
+  );
   const visibleRows = useMemo(
-    () => rows.filter((row) => (!selected || row.bucket === selected) && matchesRow(row, search)),
-    [rows, search, selected],
+    () =>
+      rows.filter((row) => {
+        const matchesSavedView =
+          !savedView ||
+          (savedView === "security" && row.isSecurity) ||
+          (savedView === "updated" && row.changes.length > 0) ||
+          (savedView === "stale" &&
+            Boolean(row.activityAt && now - Date.parse(row.activityAt) >= STALE_AFTER_MS)) ||
+          (savedView === "automation" && row.authorKind === "bot");
+        return (
+          (!selected || row.bucket === selected) &&
+          (!activeOnly || hasActiveAgent(row.agents)) &&
+          matchesSavedView &&
+          matchesRow(row, search)
+        );
+      }),
+    [activeOnly, now, rows, savedView, search, selected],
   );
 
   const styles = useMemo(() => {
@@ -218,40 +301,91 @@ export function PrRadar({ theme, layout, host, navigation }: PluginSurfaceProps)
     const mutedBorder = `${theme.colors.foregroundMuted}35`;
     return {
       screen: { flex: 1, backgroundColor: theme.colors.surface0 },
-      content: { paddingBottom: 32 },
-      header: { paddingHorizontal: gutter, paddingTop: gutter, paddingBottom: 14, gap: 14 },
+      content: {
+        width: "100%" as const,
+        maxWidth: 1180,
+        alignSelf: "center" as const,
+        paddingBottom: 48,
+      },
+      header: {
+        paddingHorizontal: gutter,
+        paddingTop: layout.compact ? 18 : 28,
+        paddingBottom: 18,
+        gap: 14,
+      },
+      signalLine: {
+        flexDirection: "row" as const,
+        alignItems: "center" as const,
+        justifyContent: "space-between" as const,
+        gap: 12,
+      },
+      signalLabel: { flexDirection: "row" as const, alignItems: "center" as const, gap: 8 },
+      signalDot: {
+        width: 7,
+        height: 7,
+        borderRadius: 4,
+        backgroundColor: theme.colors.statusSuccess,
+      },
       eyebrow: {
         color: theme.colors.foregroundMuted,
         fontSize: 11,
         fontWeight: "700" as const,
-        letterSpacing: 1.5,
+        letterSpacing: 1.8,
       },
-      heroRow: {
-        flexDirection: layout.compact ? ("column" as const) : ("row" as const),
-        alignItems: layout.compact ? ("flex-start" as const) : ("flex-end" as const),
-        gap: layout.compact ? 4 : 14,
-      },
-      heroNumber: {
-        color: counts["needs-you"] > 0 ? theme.colors.statusDanger : theme.colors.statusSuccess,
-        fontSize: layout.compact ? 44 : 56,
+      heroTitle: {
+        color: theme.colors.foreground,
+        fontSize: layout.compact ? 28 : 38,
+        lineHeight: layout.compact ? 32 : 42,
         fontWeight: "800" as const,
-        lineHeight: layout.compact ? 48 : 58,
-        letterSpacing: -2,
+        letterSpacing: -1.2,
       },
-      heroCopy: { flex: 1, gap: 2, paddingBottom: layout.compact ? 0 : 5 },
-      heroTitle: { color: theme.colors.foreground, fontSize: 18, fontWeight: "700" as const },
       heroDetail: { color: theme.colors.foregroundMuted, fontSize: 13, lineHeight: 18 },
+      summary: {
+        flexDirection: layout.compact ? ("column" as const) : ("row" as const),
+        gap: 1,
+        borderWidth: 1,
+        borderColor: theme.colors.border,
+        backgroundColor: theme.colors.border,
+        borderRadius: 12,
+        overflow: "hidden" as const,
+      },
+      metric: {
+        flex: 1,
+        paddingHorizontal: layout.compact ? 13 : 16,
+        paddingVertical: layout.compact ? 10 : 14,
+        backgroundColor: theme.colors.surface1,
+        flexDirection: layout.compact ? ("row" as const) : ("column" as const),
+        alignItems: layout.compact ? ("center" as const) : ("flex-start" as const),
+        justifyContent: "space-between" as const,
+        gap: 3,
+      },
+      metricValue: {
+        color: theme.colors.foreground,
+        fontSize: layout.compact ? 22 : 30,
+        fontWeight: "800" as const,
+      },
+      metricLabel: {
+        color: theme.colors.foregroundMuted,
+        fontSize: 10,
+        fontWeight: "700" as const,
+        letterSpacing: 0.7,
+        textTransform: "uppercase" as const,
+      },
       refresh: {
         minHeight: 36,
         justifyContent: "center" as const,
         paddingHorizontal: 12,
         borderWidth: 1,
-        borderColor: theme.colors.border,
+        borderColor: theme.colors.accent,
         borderRadius: 8,
-        backgroundColor: theme.colors.surface1,
+        backgroundColor: theme.colors.accent,
       },
       refreshPressed: { opacity: 0.72 },
-      refreshText: { color: theme.colors.foreground, fontSize: 13, fontWeight: "600" as const },
+      refreshText: {
+        color: theme.colors.accentForeground,
+        fontSize: 13,
+        fontWeight: "700" as const,
+      },
       chips: { flexDirection: "row" as const, flexWrap: "wrap" as const, gap: 7 },
       chip: {
         minHeight: 32,
@@ -373,7 +507,7 @@ export function PrRadar({ theme, layout, host, navigation }: PluginSurfaceProps)
       notice: { color: theme.colors.statusSuccess, fontSize: 13, lineHeight: 18 },
       spinner: { marginVertical: 52 },
     };
-  }, [counts, layout.compact, theme]);
+  }, [layout.compact, theme]);
 
   const openPr = useCallback(async (row: RadarRow) => {
     setOpenError(null);
@@ -387,6 +521,9 @@ export function PrRadar({ theme, layout, host, navigation }: PluginSurfaceProps)
   const renderRow = ({ item }: { item: RadarRow }) => {
     const color = bucketColor(item.bucket, theme.colors);
     const age = formatAge(item.activityAt, now);
+    const isStale = Boolean(item.activityAt && now - Date.parse(item.activityAt) >= STALE_AFTER_MS);
+    const branchSummary =
+      item.headRefName && item.baseRefName ? ` · ${item.headRefName} → ${item.baseRefName}` : "";
     const primaryAgent = item.agents[0];
     const agentAction = agentActionFor(item);
     const actionPending = agentMutation.isPending && agentMutation.variables?.id === item.id;
@@ -470,6 +607,9 @@ export function PrRadar({ theme, layout, host, navigation }: PluginSurfaceProps)
             </Text>
             <Text style={styles.badge}>{ownershipLabel}</Text>
             {item.isDraft ? <Text style={styles.badge}>DRAFT</Text> : null}
+            {item.authorKind === "bot" ? <Text style={styles.badge}>BOT</Text> : null}
+            {item.isSecurity ? <Text style={styles.badge}>SECURITY</Text> : null}
+            {isStale ? <Text style={styles.badge}>STALE</Text> : null}
           </View>
           <Text style={styles.title} numberOfLines={2} ellipsizeMode="tail">
             {item.title}
@@ -479,12 +619,20 @@ export function PrRadar({ theme, layout, host, navigation }: PluginSurfaceProps)
             <Text style={styles.reason}>{item.reason}</Text>
           </View>
           <Text style={styles.metadata} numberOfLines={1} ellipsizeMode="middle">
-            {checkSummary(item)} · {item.headRefName} → {item.baseRefName}
+            {checkSummary(item)}
+            {branchSummary}
           </Text>
           <Text style={styles.metadata} numberOfLines={1} ellipsizeMode="tail">
+            {item.author ? `${item.author} · ` : ""}
             {agentState(item)}
             {age ? ` · activity ${age} ago` : ""}
+            {item.comments > 0 ? ` · ${item.comments} comments` : ""}
           </Text>
+          {item.changes.length > 0 ? (
+            <Text style={styles.notice} numberOfLines={2}>
+              Updated · {item.changes.join(" · ")}
+            </Text>
+          ) : null}
           {layout.compact ? actions : null}
         </View>
         {layout.compact ? null : actions}
@@ -492,31 +640,31 @@ export function PrRadar({ theme, layout, host, navigation }: PluginSurfaceProps)
     );
   };
 
-  const totalCopy = `${rows.length} open ${rows.length === 1 ? "pull request" : "pull requests"} across ${data?.workspaceCount ?? 0} workspaces`;
-  const identityPending = scopeUrls.length > 0 && !viewerData && isViewerFetching;
-  const clear = !identityPending && counts["needs-you"] === 0;
+  const totalCopy = `${rows.length} open ${rows.length === 1 ? "pull request" : "pull requests"}; ${rawRows.length} linked to ${data?.workspaceCount ?? 0} workspaces`;
   const emptyCopy = search
     ? "No pull requests match this search."
-    : selected
-      ? `No pull requests are ${BUCKET_TITLES[selected].toLowerCase()}.`
-      : "Paseo has not linked an open pull request to an active workspace yet.";
+    : activeOnly
+      ? "No pull requests have a running or initializing agent."
+      : savedView
+        ? `No pull requests match the ${SAVED_VIEW_TITLES[savedView].toLowerCase()} view.`
+        : selected
+          ? `No pull requests are ${BUCKET_TITLES[selected].toLowerCase()}.`
+          : "No open pull requests are visible to GitHub or linked to a Paseo workspace.";
+  const summaryMetrics = [
+    { label: "Action now", value: counts["needs-you"] },
+    { label: "Ready", value: counts.ready },
+    { label: "Handled", value: counts["being-handled"] },
+    { label: "Waiting", value: counts.waiting },
+    { label: "Updates", value: viewerData?.updates ?? 0 },
+    { label: "Agent PRs", value: activeCount },
+  ];
 
   const header = (
     <View style={styles.header}>
-      <Text style={styles.eyebrow}>DELIVERY QUEUE</Text>
-      <View style={styles.heroRow}>
-        <Text style={styles.heroNumber}>
-          {identityPending ? "·" : clear ? "✓" : counts["needs-you"]}
-        </Text>
-        <View style={styles.heroCopy}>
-          <Text style={styles.heroTitle}>
-            {identityPending
-              ? "Resolving ownership"
-              : clear
-                ? "No unattended blockers"
-                : "need your attention"}
-          </Text>
-          <Text style={styles.heroDetail}>{totalCopy}</Text>
+      <View style={styles.signalLine}>
+        <View style={styles.signalLabel}>
+          <View style={styles.signalDot} />
+          <Text style={styles.eyebrow}>PR RADAR · {viewerData?.viewer ?? "GITHUB"}</Text>
         </View>
         <Pressable
           accessibilityRole="button"
@@ -526,17 +674,36 @@ export function PrRadar({ theme, layout, host, navigation }: PluginSurfaceProps)
           onPress={() => void Promise.all([refetch(), refetchViewer()])}
           style={({ pressed }) => [styles.refresh, pressed && styles.refreshPressed]}
         >
-          <Text style={styles.refreshText}>{isFetching ? "Refreshing…" : "Refresh"}</Text>
+          <Text style={styles.refreshText}>{isFetching ? "Scanning" : "Refresh"}</Text>
         </Pressable>
+      </View>
+      <Text style={styles.heroTitle}>Know what moves next.</Text>
+      <Text style={styles.heroDetail}>{totalCopy}</Text>
+      <View accessibilityRole="summary" style={styles.summary}>
+        {summaryMetrics.map(({ label, value }) => (
+          <View key={label} style={styles.metric}>
+            <Text style={styles.metricValue}>{value}</Text>
+            <Text style={styles.metricLabel}>{label}</Text>
+          </View>
+        ))}
       </View>
       <View accessibilityRole="tablist" style={styles.chips}>
         <Pressable
           accessibilityRole="tab"
-          accessibilityState={{ selected: selected === null }}
-          onPress={() => setSelected(null)}
-          style={[styles.chip, selected === null && styles.chipActive]}
+          accessibilityState={{ selected: selected === null && !activeOnly && !savedView }}
+          onPress={() => {
+            setSelected(null);
+            setActiveOnly(false);
+            setSavedView(null);
+          }}
+          style={[styles.chip, selected === null && !activeOnly && !savedView && styles.chipActive]}
         >
-          <Text style={[styles.chipText, selected === null && styles.chipTextActive]}>
+          <Text
+            style={[
+              styles.chipText,
+              selected === null && !activeOnly && !savedView && styles.chipTextActive,
+            ]}
+          >
             All {rows.length}
           </Text>
         </Pressable>
@@ -545,11 +712,59 @@ export function PrRadar({ theme, layout, host, navigation }: PluginSurfaceProps)
             accessibilityRole="tab"
             accessibilityState={{ selected: selected === bucket }}
             key={bucket}
-            onPress={() => setSelected(bucket)}
+            onPress={() => {
+              setSelected(bucket);
+              setActiveOnly(false);
+              setSavedView(null);
+            }}
             style={[styles.chip, selected === bucket && styles.chipActive]}
           >
             <Text style={[styles.chipText, selected === bucket && styles.chipTextActive]}>
               {BUCKET_TITLES[bucket]} {counts[bucket]}
+            </Text>
+          </Pressable>
+        ))}
+        <Pressable
+          accessibilityRole="tab"
+          accessibilityState={{ selected: activeOnly }}
+          onPress={() => {
+            setSelected(null);
+            setActiveOnly(true);
+            setSavedView(null);
+          }}
+          style={[styles.chip, activeOnly && styles.chipActive]}
+        >
+          <Text style={[styles.chipText, activeOnly && styles.chipTextActive]}>
+            Active agents {activeCount}
+          </Text>
+        </Pressable>
+        {(Object.keys(SAVED_VIEW_TITLES) as SavedView[]).map((view) => (
+          <Pressable
+            accessibilityRole="tab"
+            accessibilityState={{ selected: savedView === view }}
+            key={view}
+            onPress={() => {
+              setSelected(null);
+              setActiveOnly(false);
+              setSavedView(view);
+            }}
+            style={[styles.chip, savedView === view && styles.chipActive]}
+          >
+            <Text style={[styles.chipText, savedView === view && styles.chipTextActive]}>
+              {SAVED_VIEW_TITLES[view]} {savedViewCounts[view]}
+            </Text>
+          </Pressable>
+        ))}
+        {([7, 30, 90] as const).map((days) => (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ selected: windowDays === days }}
+            key={days}
+            onPress={() => setWindowDays(days)}
+            style={[styles.chip, windowDays === days && styles.chipActive]}
+          >
+            <Text style={[styles.chipText, windowDays === days && styles.chipTextActive]}>
+              {days}d
             </Text>
           </Pressable>
         ))}
@@ -564,6 +779,36 @@ export function PrRadar({ theme, layout, host, navigation }: PluginSurfaceProps)
         style={styles.search}
         value={search}
       />
+      {viewerData ? (
+        <View style={{ gap: 7 }}>
+          <Text style={styles.heroDetail}>
+            {viewerData.coverageNote}
+            {viewerData.truncated ? " Results reached the 100-item inbox cap." : ""}
+          </Text>
+          {viewerData.updates > 0 ? (
+            <Text style={styles.heroDetail}>
+              These are PR state changes detected in the {windowDays}-day view. Marking them seen
+              only clears PR Radar badges; it does not change GitHub notifications or pull requests.
+            </Text>
+          ) : null}
+          {viewerData.updates > 0 ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`Mark ${viewerData.updates} detected pull request updates as seen`}
+              accessibilityState={{ busy: acknowledgeMutation.isPending }}
+              disabled={acknowledgeMutation.isPending}
+              onPress={() => acknowledgeMutation.mutate()}
+              style={({ pressed }) => [styles.refresh, pressed && styles.refreshPressed]}
+            >
+              <Text style={styles.refreshText}>
+                {acknowledgeMutation.isPending
+                  ? "Marking…"
+                  : `Mark ${viewerData.updates} updates seen`}
+              </Text>
+            </Pressable>
+          ) : null}
+        </View>
+      ) : null}
       {actionNotice ? <Text style={styles.notice}>{actionNotice}</Text> : null}
       {openError ? <Text style={styles.error}>{openError}</Text> : null}
       {error ? (

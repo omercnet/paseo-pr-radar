@@ -9,10 +9,13 @@ import {
   checkSummary,
   classifyRow,
   formatAge,
+  hasActiveAgent,
   matchesRow,
+  mergeInboxRows,
   type RadarAgent,
   type RadarRow,
 } from "../src/lib/radar.shared";
+import type { GitHubInboxItem } from "../src/lib/viewer-scope.shared";
 
 function agent(overrides: Partial<RadarAgent> = {}): RadarAgent {
   return {
@@ -37,12 +40,19 @@ function row(overrides: Partial<RadarRow> = {}): RadarRow {
     baseRefName: "main",
     headRefName: "fix/checkout",
     isDraft: false,
+    author: "omercnet",
+    authorKind: "human",
+    isSecurity: false,
+    comments: 0,
+    labels: [],
+    changes: [],
     mergeable: "MERGEABLE",
     mergeStateStatus: "CLEAN",
     checksStatus: "success",
     reviewDecision: "approved",
     checks: [{ name: "test", status: "success", url: null }],
     workspaceIds: ["workspace-1"],
+    localProjectRoot: "/work/paseo",
     workspaceNames: ["Fix checkout"],
     agents: [agent()],
     ownership: "mine",
@@ -130,6 +140,13 @@ function entry(workspaceId: string, overrides: Record<string, unknown> = {}): Ag
 }
 
 describe("PR triage", () => {
+  test("identifies only running and initializing agents as active", () => {
+    expect(hasActiveAgent([agent({ status: "running" })])).toBe(true);
+    expect(hasActiveAgent([agent({ status: "initializing" })])).toBe(true);
+    expect(hasActiveAgent([agent({ status: "idle" })])).toBe(false);
+    expect(hasActiveAgent([agent({ status: "error" })])).toBe(false);
+  });
+
   test("does not interrupt a running agent for a failing PR", () => {
     expect(
       classifyRow(
@@ -394,6 +411,21 @@ describe("agent actions", () => {
     expect(buildAgentPrompt(value)).toContain("requesting your review");
   });
 
+  test("creates a PR checkout action for an untracked inbox PR", () => {
+    const value = row({
+      agents: [],
+      bucket: "needs-you",
+      workspaceIds: [],
+      localProjectRoot: "/work/paseo",
+    });
+    expect(agentActionFor(value)).toEqual({
+      kind: "checkout",
+      cwd: "/work/paseo",
+      number: 42,
+      repository: "getpaseo/paseo",
+    });
+  });
+
   test("does not automate non-actionable or permission-wait rows", () => {
     expect(agentActionFor(row({ bucket: "waiting" }))).toBeNull();
     expect(
@@ -404,6 +436,82 @@ describe("agent actions", () => {
         }),
       ),
     ).toBeNull();
+  });
+});
+
+describe("GitHub inbox merge", () => {
+  test("adds an authored inbox PR without a linked workspace", () => {
+    const snapshot = buildRadarSnapshot([], []);
+    snapshot.repositoryRoots["example/project"] = "/work/project";
+    const item: GitHubInboxItem = {
+      id: "PR_9",
+      number: 9,
+      url: "https://github.com/example/project/pull/9",
+      title: "Fix production rollout",
+      repository: "example/project",
+      author: "omercnet",
+      authorKind: "human",
+      createdAt: "2026-09-01T08:00:00.000Z",
+      updatedAt: "2026-09-02T08:00:00.000Z",
+      baseRefName: "main",
+      headRefName: "fix/rollout",
+      isDraft: false,
+      isSecurity: false,
+      comments: 2,
+      labels: [],
+      mergeable: "MERGEABLE",
+      mergeStateStatus: "BLOCKED",
+      checksStatus: "failure",
+      reviewDecision: "changes_requested",
+      role: "author",
+      changes: ["Checks: success → failure"],
+    };
+
+    const [merged] = mergeInboxRows(snapshot, [item]);
+    expect(merged).toMatchObject({
+      id: "example/project#9",
+      ownership: "mine",
+      bucket: "needs-you",
+      reason: "Checks failing",
+      localProjectRoot: "/work/project",
+      changes: ["Checks: success → failure"],
+    });
+  });
+
+  test("preserves active agents when GitHub refreshes a linked PR", () => {
+    const snapshot = buildRadarSnapshot(
+      [workspace("workspace-1")],
+      [entry("workspace-1", { status: "running" })],
+    );
+    const source = snapshot.rows[0];
+    if (!source) throw new Error("Expected a workspace-linked PR row");
+    const inbox: GitHubInboxItem = {
+      id: "PR_42",
+      number: 42,
+      url: source.url,
+      title: source.title,
+      repository: source.repository,
+      author: "omercnet",
+      authorKind: "human",
+      createdAt: "2026-08-30T08:00:00.000Z",
+      updatedAt: "2026-08-30T10:00:00.000Z",
+      baseRefName: "main",
+      headRefName: "fix/checkout",
+      isDraft: false,
+      isSecurity: false,
+      comments: 1,
+      labels: [],
+      mergeable: "MERGEABLE",
+      mergeStateStatus: "CLEAN",
+      checksStatus: "success",
+      reviewDecision: "approved",
+      role: "author",
+      changes: [],
+    };
+
+    const [merged] = mergeInboxRows(snapshot, [inbox]);
+    expect(merged?.agents).toHaveLength(1);
+    expect(merged?.bucket).toBe("being-handled");
   });
 });
 describe("viewer scope", () => {
@@ -419,6 +527,7 @@ describe("viewer scope", () => {
       authoredUrls: [mine.url],
       reviewRequestedUrls: [review.url],
       error: null,
+      inboxItems: [],
     });
 
     expect(scoped.find((item) => item.id === mine.id)?.ownership).toBe("mine");
