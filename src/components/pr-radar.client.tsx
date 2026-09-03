@@ -178,7 +178,7 @@ export function PrRadar({ theme, layout, host, navigation }: PluginSurfaceProps)
   const acknowledgeMutation = useMutation({
     mutationFn: () => acknowledgeUpdates({ windowDays }),
     onSuccess: async () => {
-      setActionNotice("Radar updates cleared.");
+      setActionNotice("PR Radar updates marked as seen.");
       await refetchViewer();
     },
     onError: (mutationError) => {
@@ -786,9 +786,15 @@ export function PrRadar({ theme, layout, host, navigation }: PluginSurfaceProps)
             {viewerData.truncated ? " Results reached the 100-item inbox cap." : ""}
           </Text>
           {viewerData.updates > 0 ? (
+            <Text style={styles.heroDetail}>
+              These are PR state changes detected in the {windowDays}-day view. Marking them seen
+              only clears PR Radar badges; it does not change GitHub notifications or pull requests.
+            </Text>
+          ) : null}
+          {viewerData.updates > 0 ? (
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel={`Clear ${viewerData.updates} pull request updates`}
+              accessibilityLabel={`Mark ${viewerData.updates} detected pull request updates as seen`}
               accessibilityState={{ busy: acknowledgeMutation.isPending }}
               disabled={acknowledgeMutation.isPending}
               onPress={() => acknowledgeMutation.mutate()}
@@ -796,8 +802,8 @@ export function PrRadar({ theme, layout, host, navigation }: PluginSurfaceProps)
             >
               <Text style={styles.refreshText}>
                 {acknowledgeMutation.isPending
-                  ? "Clearing…"
-                  : `Clear ${viewerData.updates} updates`}
+                  ? "Marking…"
+                  : `Mark ${viewerData.updates} updates seen`}
               </Text>
             </Pressable>
           ) : null}
