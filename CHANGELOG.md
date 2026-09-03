@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/omercnet/paseo-pr-radar/compare/v0.2.0...v0.3.0) (2026-09-03)
+
+
+### Features
+
+* redesign PR Radar around GitHub inbox ([#12](https://github.com/omercnet/paseo-pr-radar/issues/12)) ([d56a0d8](https://github.com/omercnet/paseo-pr-radar/commit/d56a0d8f662a6a1b926dbe272ea2ccdc68a5792d))
+
 ## [0.2.0](https://github.com/omercnet/paseo-pr-radar/compare/v0.1.0...v0.2.0) (2026-08-31)
 
 
