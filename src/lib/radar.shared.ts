@@ -141,7 +141,7 @@ function parseRepository(url: string): string {
   }
 }
 
-function hasActiveAgent(agents: readonly RadarAgent[]): boolean {
+export function hasActiveAgent(agents: readonly RadarAgent[]): boolean {
   return agents.some((agent) => agent.status === "running" || agent.status === "initializing");
 }
 

@@ -21,6 +21,7 @@ import {
   buildRadarSnapshot,
   checkSummary,
   formatAge,
+  hasActiveAgent,
   matchesRow,
   type RadarBucket,
   type RadarRow,
@@ -86,6 +87,7 @@ export function PrRadar({ theme, layout, host, navigation }: PluginSurfaceProps)
   const queryKey = useMemo(() => ["pr-radar", host.id], [host.id]);
   const resolveViewerScope = useRpc(viewerScope);
   const [selected, setSelected] = useState<RadarBucket | null>(null);
+  const [activeOnly, setActiveOnly] = useState(false);
   const [search, setSearch] = useState("");
   const [now, setNow] = useState(() => Date.now());
   const [openError, setOpenError] = useState<string | null>(null);
@@ -208,9 +210,19 @@ export function PrRadar({ theme, layout, host, navigation }: PluginSurfaceProps)
     for (const row of rows) result[row.bucket] += 1;
     return result;
   }, [rows]);
+  const activeCount = useMemo(
+    () => rows.filter((row) => hasActiveAgent(row.agents)).length,
+    [rows],
+  );
   const visibleRows = useMemo(
-    () => rows.filter((row) => (!selected || row.bucket === selected) && matchesRow(row, search)),
-    [rows, search, selected],
+    () =>
+      rows.filter(
+        (row) =>
+          (!selected || row.bucket === selected) &&
+          (!activeOnly || hasActiveAgent(row.agents)) &&
+          matchesRow(row, search),
+      ),
+    [activeOnly, rows, search, selected],
   );
 
   const styles = useMemo(() => {
@@ -497,9 +509,11 @@ export function PrRadar({ theme, layout, host, navigation }: PluginSurfaceProps)
   const clear = !identityPending && counts["needs-you"] === 0;
   const emptyCopy = search
     ? "No pull requests match this search."
-    : selected
-      ? `No pull requests are ${BUCKET_TITLES[selected].toLowerCase()}.`
-      : "Paseo has not linked an open pull request to an active workspace yet.";
+    : activeOnly
+      ? "No pull requests have a running or initializing agent."
+      : selected
+        ? `No pull requests are ${BUCKET_TITLES[selected].toLowerCase()}.`
+        : "Paseo has not linked an open pull request to an active workspace yet.";
 
   const header = (
     <View style={styles.header}>
@@ -532,11 +546,16 @@ export function PrRadar({ theme, layout, host, navigation }: PluginSurfaceProps)
       <View accessibilityRole="tablist" style={styles.chips}>
         <Pressable
           accessibilityRole="tab"
-          accessibilityState={{ selected: selected === null }}
-          onPress={() => setSelected(null)}
-          style={[styles.chip, selected === null && styles.chipActive]}
+          accessibilityState={{ selected: selected === null && !activeOnly }}
+          onPress={() => {
+            setSelected(null);
+            setActiveOnly(false);
+          }}
+          style={[styles.chip, selected === null && !activeOnly && styles.chipActive]}
         >
-          <Text style={[styles.chipText, selected === null && styles.chipTextActive]}>
+          <Text
+            style={[styles.chipText, selected === null && !activeOnly && styles.chipTextActive]}
+          >
             All {rows.length}
           </Text>
         </Pressable>
@@ -545,7 +564,10 @@ export function PrRadar({ theme, layout, host, navigation }: PluginSurfaceProps)
             accessibilityRole="tab"
             accessibilityState={{ selected: selected === bucket }}
             key={bucket}
-            onPress={() => setSelected(bucket)}
+            onPress={() => {
+              setSelected(bucket);
+              setActiveOnly(false);
+            }}
             style={[styles.chip, selected === bucket && styles.chipActive]}
           >
             <Text style={[styles.chipText, selected === bucket && styles.chipTextActive]}>
@@ -553,6 +575,19 @@ export function PrRadar({ theme, layout, host, navigation }: PluginSurfaceProps)
             </Text>
           </Pressable>
         ))}
+        <Pressable
+          accessibilityRole="tab"
+          accessibilityState={{ selected: activeOnly }}
+          onPress={() => {
+            setSelected(null);
+            setActiveOnly(true);
+          }}
+          style={[styles.chip, activeOnly && styles.chipActive]}
+        >
+          <Text style={[styles.chipText, activeOnly && styles.chipTextActive]}>
+            Active agents {activeCount}
+          </Text>
+        </Pressable>
       </View>
       <TextInput
         accessibilityLabel="Filter pull requests"

@@ -9,6 +9,7 @@ import {
   checkSummary,
   classifyRow,
   formatAge,
+  hasActiveAgent,
   matchesRow,
   type RadarAgent,
   type RadarRow,
@@ -130,6 +131,13 @@ function entry(workspaceId: string, overrides: Record<string, unknown> = {}): Ag
 }
 
 describe("PR triage", () => {
+  test("identifies only running and initializing agents as active", () => {
+    expect(hasActiveAgent([agent({ status: "running" })])).toBe(true);
+    expect(hasActiveAgent([agent({ status: "initializing" })])).toBe(true);
+    expect(hasActiveAgent([agent({ status: "idle" })])).toBe(false);
+    expect(hasActiveAgent([agent({ status: "error" })])).toBe(false);
+  });
+
   test("does not interrupt a running agent for a failing PR", () => {
     expect(
       classifyRow(
