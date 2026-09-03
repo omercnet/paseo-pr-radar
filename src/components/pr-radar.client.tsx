@@ -301,40 +301,91 @@ export function PrRadar({ theme, layout, host, navigation }: PluginSurfaceProps)
     const mutedBorder = `${theme.colors.foregroundMuted}35`;
     return {
       screen: { flex: 1, backgroundColor: theme.colors.surface0 },
-      content: { paddingBottom: 32 },
-      header: { paddingHorizontal: gutter, paddingTop: gutter, paddingBottom: 14, gap: 14 },
+      content: {
+        width: "100%" as const,
+        maxWidth: 1180,
+        alignSelf: "center" as const,
+        paddingBottom: 48,
+      },
+      header: {
+        paddingHorizontal: gutter,
+        paddingTop: layout.compact ? 18 : 28,
+        paddingBottom: 18,
+        gap: 14,
+      },
+      signalLine: {
+        flexDirection: "row" as const,
+        alignItems: "center" as const,
+        justifyContent: "space-between" as const,
+        gap: 12,
+      },
+      signalLabel: { flexDirection: "row" as const, alignItems: "center" as const, gap: 8 },
+      signalDot: {
+        width: 7,
+        height: 7,
+        borderRadius: 4,
+        backgroundColor: theme.colors.statusSuccess,
+      },
       eyebrow: {
         color: theme.colors.foregroundMuted,
         fontSize: 11,
         fontWeight: "700" as const,
-        letterSpacing: 1.5,
+        letterSpacing: 1.8,
       },
-      heroRow: {
-        flexDirection: layout.compact ? ("column" as const) : ("row" as const),
-        alignItems: layout.compact ? ("flex-start" as const) : ("flex-end" as const),
-        gap: layout.compact ? 4 : 14,
-      },
-      heroNumber: {
-        color: counts["needs-you"] > 0 ? theme.colors.statusDanger : theme.colors.statusSuccess,
-        fontSize: layout.compact ? 44 : 56,
+      heroTitle: {
+        color: theme.colors.foreground,
+        fontSize: layout.compact ? 28 : 38,
+        lineHeight: layout.compact ? 32 : 42,
         fontWeight: "800" as const,
-        lineHeight: layout.compact ? 48 : 58,
-        letterSpacing: -2,
+        letterSpacing: -1.2,
       },
-      heroCopy: { flex: 1, gap: 2, paddingBottom: layout.compact ? 0 : 5 },
-      heroTitle: { color: theme.colors.foreground, fontSize: 18, fontWeight: "700" as const },
       heroDetail: { color: theme.colors.foregroundMuted, fontSize: 13, lineHeight: 18 },
+      summary: {
+        flexDirection: layout.compact ? ("column" as const) : ("row" as const),
+        gap: 1,
+        borderWidth: 1,
+        borderColor: theme.colors.border,
+        backgroundColor: theme.colors.border,
+        borderRadius: 12,
+        overflow: "hidden" as const,
+      },
+      metric: {
+        flex: 1,
+        paddingHorizontal: layout.compact ? 13 : 16,
+        paddingVertical: layout.compact ? 10 : 14,
+        backgroundColor: theme.colors.surface1,
+        flexDirection: layout.compact ? ("row" as const) : ("column" as const),
+        alignItems: layout.compact ? ("center" as const) : ("flex-start" as const),
+        justifyContent: "space-between" as const,
+        gap: 3,
+      },
+      metricValue: {
+        color: theme.colors.foreground,
+        fontSize: layout.compact ? 22 : 30,
+        fontWeight: "800" as const,
+      },
+      metricLabel: {
+        color: theme.colors.foregroundMuted,
+        fontSize: 10,
+        fontWeight: "700" as const,
+        letterSpacing: 0.7,
+        textTransform: "uppercase" as const,
+      },
       refresh: {
         minHeight: 36,
         justifyContent: "center" as const,
         paddingHorizontal: 12,
         borderWidth: 1,
-        borderColor: theme.colors.border,
+        borderColor: theme.colors.accent,
         borderRadius: 8,
-        backgroundColor: theme.colors.surface1,
+        backgroundColor: theme.colors.accent,
       },
       refreshPressed: { opacity: 0.72 },
-      refreshText: { color: theme.colors.foreground, fontSize: 13, fontWeight: "600" as const },
+      refreshText: {
+        color: theme.colors.accentForeground,
+        fontSize: 13,
+        fontWeight: "700" as const,
+      },
       chips: { flexDirection: "row" as const, flexWrap: "wrap" as const, gap: 7 },
       chip: {
         minHeight: 32,
@@ -456,7 +507,7 @@ export function PrRadar({ theme, layout, host, navigation }: PluginSurfaceProps)
       notice: { color: theme.colors.statusSuccess, fontSize: 13, lineHeight: 18 },
       spinner: { marginVertical: 52 },
     };
-  }, [counts, layout.compact, theme]);
+  }, [layout.compact, theme]);
 
   const openPr = useCallback(async (row: RadarRow) => {
     setOpenError(null);
@@ -590,8 +641,6 @@ export function PrRadar({ theme, layout, host, navigation }: PluginSurfaceProps)
   };
 
   const totalCopy = `${rows.length} open ${rows.length === 1 ? "pull request" : "pull requests"}; ${rawRows.length} linked to ${data?.workspaceCount ?? 0} workspaces`;
-  const identityPending = !viewerData && isViewerFetching;
-  const clear = !identityPending && counts["needs-you"] === 0;
   const emptyCopy = search
     ? "No pull requests match this search."
     : activeOnly
@@ -601,23 +650,21 @@ export function PrRadar({ theme, layout, host, navigation }: PluginSurfaceProps)
         : selected
           ? `No pull requests are ${BUCKET_TITLES[selected].toLowerCase()}.`
           : "No open pull requests are visible to GitHub or linked to a Paseo workspace.";
+  const summaryMetrics = [
+    { label: "Action now", value: counts["needs-you"] },
+    { label: "Ready", value: counts.ready },
+    { label: "Handled", value: counts["being-handled"] },
+    { label: "Waiting", value: counts.waiting },
+    { label: "Updates", value: viewerData?.updates ?? 0 },
+    { label: "Agent PRs", value: activeCount },
+  ];
 
   const header = (
     <View style={styles.header}>
-      <Text style={styles.eyebrow}>DELIVERY QUEUE</Text>
-      <View style={styles.heroRow}>
-        <Text style={styles.heroNumber}>
-          {identityPending ? "·" : clear ? "✓" : counts["needs-you"]}
-        </Text>
-        <View style={styles.heroCopy}>
-          <Text style={styles.heroTitle}>
-            {identityPending
-              ? "Resolving ownership"
-              : clear
-                ? "No unattended blockers"
-                : "need your attention"}
-          </Text>
-          <Text style={styles.heroDetail}>{totalCopy}</Text>
+      <View style={styles.signalLine}>
+        <View style={styles.signalLabel}>
+          <View style={styles.signalDot} />
+          <Text style={styles.eyebrow}>PR RADAR · {viewerData?.viewer ?? "GITHUB"}</Text>
         </View>
         <Pressable
           accessibilityRole="button"
@@ -627,8 +674,18 @@ export function PrRadar({ theme, layout, host, navigation }: PluginSurfaceProps)
           onPress={() => void Promise.all([refetch(), refetchViewer()])}
           style={({ pressed }) => [styles.refresh, pressed && styles.refreshPressed]}
         >
-          <Text style={styles.refreshText}>{isFetching ? "Refreshing…" : "Refresh"}</Text>
+          <Text style={styles.refreshText}>{isFetching ? "Scanning" : "Refresh"}</Text>
         </Pressable>
+      </View>
+      <Text style={styles.heroTitle}>Know what moves next.</Text>
+      <Text style={styles.heroDetail}>{totalCopy}</Text>
+      <View accessibilityRole="summary" style={styles.summary}>
+        {summaryMetrics.map(({ label, value }) => (
+          <View key={label} style={styles.metric}>
+            <Text style={styles.metricValue}>{value}</Text>
+            <Text style={styles.metricLabel}>{label}</Text>
+          </View>
+        ))}
       </View>
       <View accessibilityRole="tablist" style={styles.chips}>
         <Pressable

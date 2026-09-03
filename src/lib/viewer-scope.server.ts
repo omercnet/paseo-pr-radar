@@ -66,10 +66,26 @@ async function runGh(args: string[], timeout = COMMAND_TIMEOUT_MS): Promise<stri
   return stdout.trim();
 }
 
+function delay(milliseconds: number): Promise<void> {
+  const { promise, resolve } = Promise.withResolvers<void>();
+  setTimeout(resolve, milliseconds);
+  return promise;
+}
+
 async function viewerLogin(): Promise<string> {
-  const login = await runGh(["api", "user", "--jq", ".login"]);
-  if (!login) throw new Error("GitHub CLI is not authenticated on this Paseo host.");
-  return login;
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const login = await runGh(["api", "user", "--jq", ".login"]);
+      if (login) return login;
+    } catch (error) {
+      lastError = error;
+      if (attempt === 0) await delay(250);
+    }
+  }
+  throw lastError instanceof Error
+    ? lastError
+    : new Error("GitHub CLI is not authenticated on this Paseo host.");
 }
 
 async function searchPullRequests(
@@ -356,6 +372,7 @@ export async function resolveViewerScope({
       error: null,
     };
   } catch (error) {
+    console.error("PR Radar GitHub inbox refresh failed", error);
     return {
       viewer: null,
       authoredUrls: [],
