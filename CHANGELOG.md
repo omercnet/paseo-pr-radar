@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/omercnet/paseo-pr-radar/compare/v0.3.0...v0.3.1) (2026-09-03)
+
+
+### Bug Fixes
+
+* package release assets ([#14](https://github.com/omercnet/paseo-pr-radar/issues/14)) ([6a841a1](https://github.com/omercnet/paseo-pr-radar/commit/6a841a1d66585374f26831505dc450c36b076e59))
+
 ## [0.3.0](https://github.com/omercnet/paseo-pr-radar/compare/v0.2.0...v0.3.0) (2026-09-03)
 
 
