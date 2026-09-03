@@ -11,11 +11,11 @@ browser DOM was rewritten before capture so no private identifiers are published
 
 ### Wide dashboard
 
-![PR Radar wide dashboard](docs/images/pr-radar-wide.png)
+![PR Radar wide dashboard](docs/images/pr-radar-github-inbox-wide.png)
 
 ### Compact dashboard
 
-![PR Radar compact dashboard](docs/images/pr-radar-compact.png)
+![PR Radar compact dashboard](docs/images/pr-radar-github-inbox-compact.png)
 
 ## What it shows
 
