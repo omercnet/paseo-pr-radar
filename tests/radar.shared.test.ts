@@ -14,8 +14,8 @@ import {
   mergeInboxRows,
   type RadarAgent,
   type RadarRow,
-} from "../src/lib/radar.shared";
-import type { GitHubInboxItem } from "../src/lib/viewer-scope.shared";
+} from "../shared/radar";
+import type { GitHubInboxItem } from "../shared/viewer-scope";
 
 function agent(overrides: Partial<RadarAgent> = {}): RadarAgent {
   return {

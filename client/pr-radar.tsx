@@ -1,5 +1,5 @@
 import type { PaseoApi, PaseoWorkspace } from "@getpaseo/client";
-import { type PluginSurfaceProps, usePaseo, useRpc } from "@getpaseo/plugin";
+import { type PluginSurfaceProps, usePaseo, useRpc } from "@getpaseo/plugin/client";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
@@ -26,8 +26,8 @@ import {
   mergeInboxRows,
   type RadarBucket,
   type RadarRow,
-} from "../lib/radar.shared";
-import { acknowledgeViewerScope, viewerScope } from "../lib/viewer-scope.shared";
+} from "../shared/radar";
+import { acknowledgeViewerScope, viewerScope } from "../shared/viewer-scope";
 
 const PAGE_LIMIT = 200;
 const MAX_PAGES = 10;
