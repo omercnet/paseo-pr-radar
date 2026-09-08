@@ -1,6 +1,6 @@
 import type { PaseoAgentListResult, PaseoWorkspace } from "@getpaseo/client";
 import { z } from "zod";
-import type { GitHubInboxItem } from "./viewer-scope.shared";
+import type { GitHubInboxItem } from "./viewer-scope";
 
 export type AgentEntry = PaseoAgentListResult["entries"][number];
 export type RadarBucket = "needs-you" | "being-handled" | "waiting" | "ready";

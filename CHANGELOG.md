@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+* Migrate PR Radar to Paseo 0.8 runtime entries.
+
 ## [0.3.1](https://github.com/omercnet/paseo-pr-radar/compare/v0.3.0...v0.3.1) (2026-09-03)
 
 

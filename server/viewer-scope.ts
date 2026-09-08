@@ -4,7 +4,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import type { z } from "zod";
-import type { acknowledgeViewerScope, GitHubInboxItem, viewerScope } from "./viewer-scope.shared";
+import type { acknowledgeViewerScope, GitHubInboxItem, viewerScope } from "../shared/viewer-scope";
 
 const execFileAsync = promisify(execFile);
 const SEARCH_LIMIT = 100;
