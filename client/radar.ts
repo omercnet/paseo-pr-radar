@@ -1,8 +1,10 @@
-import type { PaseoAgentListResult, PaseoWorkspace } from "@getpaseo/client";
+import type { usePaseo } from "@getpaseo/plugin/client";
 import { z } from "zod";
-import type { GitHubInboxItem } from "./viewer-scope";
+import type { GitHubInboxItem } from "../shared/viewer-scope";
 
-export type AgentEntry = PaseoAgentListResult["entries"][number];
+export type PaseoApi = ReturnType<typeof usePaseo>;
+export type PaseoWorkspace = Awaited<ReturnType<PaseoApi["workspaces"]["list"]>>["entries"][number];
+export type AgentEntry = Awaited<ReturnType<PaseoApi["agents"]["list"]>>["entries"][number];
 export type RadarBucket = "needs-you" | "being-handled" | "waiting" | "ready";
 
 export const BUCKETS: readonly RadarBucket[] = ["needs-you", "ready", "being-handled", "waiting"];

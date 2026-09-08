@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import type { PaseoWorkspace } from "@getpaseo/client";
 import {
   type AgentEntry,
   agentActionFor,
@@ -12,9 +11,10 @@ import {
   hasActiveAgent,
   matchesRow,
   mergeInboxRows,
+  type PaseoWorkspace,
   type RadarAgent,
   type RadarRow,
-} from "../shared/radar";
+} from "../client/radar";
 import type { GitHubInboxItem } from "../shared/viewer-scope";
 
 function agent(overrides: Partial<RadarAgent> = {}): RadarAgent {
