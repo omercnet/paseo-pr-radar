@@ -1,4 +1,3 @@
-import type { PaseoApi, PaseoWorkspace } from "@getpaseo/client";
 import { type PluginSurfaceProps, usePaseo, useRpc } from "@getpaseo/plugin/client";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -11,6 +10,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { acknowledgeViewerScope, viewerScope } from "../shared/viewer-scope";
 import {
   type AgentEntry,
   agentActionFor,
@@ -24,10 +24,11 @@ import {
   hasActiveAgent,
   matchesRow,
   mergeInboxRows,
+  type PaseoApi,
+  type PaseoWorkspace,
   type RadarBucket,
   type RadarRow,
-} from "../shared/radar";
-import { acknowledgeViewerScope, viewerScope } from "../shared/viewer-scope";
+} from "./radar";
 
 const PAGE_LIMIT = 200;
 const MAX_PAGES = 10;
