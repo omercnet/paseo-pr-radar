@@ -1,5 +1,15 @@
 # PR Radar
 
+> [!IMPORTANT]
+> This repository is archived. Development moved to
+> [`omercnet/paseo-plugins/pr-radar`](https://github.com/omercnet/paseo-plugins/tree/main/pr-radar).
+> Existing Paseo Git installations remain on this repository. Migrate with:
+>
+> ```bash
+> paseo plugin remove pr-radar
+> paseo plugin add omercnet/paseo-plugins:pr-radar
+> ```
+
 A Paseo plugin that turns pull requests linked to active workspaces into a viewer-aware delivery queue.
 
 PR Radar combines Paseo workspace and agent state with pull request checks, review status, mergeability, and the current GitHub user's relationship to each pull request. It answers which deliverables need you, which are already being handled, and which are waiting elsewhere.
@@ -30,13 +40,10 @@ Paseo supplies normalized workspace pull request status. A daemon-side plugin ha
 
 ## Install
 
-Download the `pr-radar-vX.Y.Z.zip` asset from a GitHub release on the Paseo daemon host, then extract and install its top-level directory:
+Install from the plugin's monorepo directory on the Paseo daemon host:
 
 ```bash
-unzip pr-radar-vX.Y.Z.zip
-cd pr-radar
-bun install --frozen-lockfile
-bunx paseo plugin install "$PWD"
+paseo plugin add omercnet/paseo-plugins:pr-radar
 ```
 
 The daemon must have plugins enabled and `gh` authenticated for GitHub viewer-aware triage.
